@@ -13,6 +13,11 @@ import (
 var log = logrus.New()
 
 func Publish(ip net.IP, iface net.Interface, service Service, shutdown chan struct{}, waitGroup *sync.WaitGroup) (err error) {
+	var zc = zeroconfInterface{}
+	return publish(ip, iface, service, shutdown, waitGroup, zc)
+}
+
+func publish(ip net.IP, iface net.Interface, service Service, shutdown chan struct{}, waitGroup *sync.WaitGroup, zc zeroconfServicer) (err error) {
 	defer waitGroup.Done()
 	svcEntry := zeroconf.NewServiceEntry(service.Name, service.SvcType, service.Domain)
 	svcEntry.Port = service.Port
@@ -25,7 +30,7 @@ func Publish(ip net.IP, iface net.Interface, service Service, shutdown chan stru
 	log.WithFields(logrus.Fields{
 		"name": svcEntry.Instance,
 	}).Info("Zeroconf registering service")
-	s, err := zeroconf.RegisterSvcEntry(svcEntry, []net.Interface{iface})
+	s, err := zc.RegisterSvcEntry(svcEntry, []net.Interface{iface})
 	if err != nil {
 		log.Error("Failed to create zeroconf Server", err)
 		return err
@@ -125,4 +130,43 @@ func (_ networkInterface) Addrs(intf *net.Interface) ([]net.Addr, error) {
 
 func (_ networkInterface) Interfaces() ([]net.Interface, error) {
 	return net.Interfaces()
+}
+
+type zeroconfServer interface {
+	Shutdown()
+	SetText(text []string)
+	TTL(timeout uint32)
+}
+
+type zeroconfServe struct {
+	server *zeroconf.Server
+}
+
+func (zc zeroconfServe) Shutdown() {
+	zc.server.Shutdown()
+}
+
+func (zc zeroconfServe) TTL(timeout uint32) {
+	zc.server.TTL(timeout)
+}
+
+func (zc zeroconfServe) SetText(text []string) {
+	zc.server.SetText(text)
+}
+
+type zeroconfServicer interface {
+	// NewServiceEntry(instance, service, domain string) *zeroconf.ServiceEntry
+	RegisterSvcEntry(entry *zeroconf.ServiceEntry, ifaces []net.Interface) (zeroconfServer, error)
+}
+
+type zeroconfInterface struct{}
+
+// func (_ zeroconfInterface) NewServiceEntry(instance, service, domain string) *zeroconf.ServiceEntry {
+// 	return zeroconf.NewServiceEntry(instance, service, domain)
+// }
+
+func (_ zeroconfInterface) RegisterSvcEntry(entry *zeroconf.ServiceEntry, ifaces []net.Interface) (zeroconfServer, error) {
+	s, error := zeroconf.RegisterSvcEntry(entry, ifaces)
+	zcs := &zeroconfServe{server: s}
+	return zcs, error
 }

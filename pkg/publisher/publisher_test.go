@@ -3,8 +3,10 @@ package publisher
 import (
 	"fmt"
 	"net"
+	"sync"
 	"testing"
 
+	"github.com/celebdor/zeroconf"
 	"github.com/sirupsen/logrus"
 )
 
@@ -32,7 +34,38 @@ var (
 	upIntf       = makeIntf(1, "eth3", flagUp)
 )
 
+func makeService() Service {
+	return Service{
+		Name:     "myname",
+		HostName: "myhostname",
+		SvcType:  "myservicetype",
+		Domain:   "mydomain",
+	}
+}
+
+var (
+	service = makeService()
+)
+
 func TestPublish(t *testing.T) {
+	SetLogLevel(logrus.DebugLevel)
+	testCases := []struct {
+		tcase      string
+		ip         net.IP
+		iface      net.Interface
+		service    Service
+		zc         zeroconfServicer
+		expected   string
+		errStrFrag string
+	}{
+		{"ipv4", net.ParseIP("10.254.71.145"), upIntf, service, zeroconfInterfaceTest{}, "", ""},
+	}
+	for _, tc := range testCases {
+		var shutdown = make(chan struct{})
+		var waitGroup = &sync.WaitGroup{}
+		go publish(tc.ip, tc.iface, tc.service, shutdown, waitGroup, tc.zc)
+		close(shutdown)
+	}
 }
 
 func TestFindIFace(t *testing.T) {
@@ -183,4 +216,25 @@ func (_ networkInterfaceWithInvalidAddr) Addrs(intf *net.Interface) ([]net.Addr,
 }
 func (_ networkInterfaceWithInvalidAddr) Interfaces() ([]net.Interface, error) {
 	return []net.Interface{upIntf}, nil
+}
+
+type zeroconfServerTest struct{}
+
+func (_ zeroconfServerTest) Shutdown() {
+	log.Info("Shutdown called")
+}
+
+func (_ zeroconfServerTest) SetText(text []string) {
+	log.Infof("SetText called with: %v", text)
+}
+
+func (_ zeroconfServerTest) TTL(timeout uint32) {
+	log.Infof("TTL called with: %v", timeout)
+}
+
+type zeroconfInterfaceTest struct{}
+
+func (zeroconfInterfaceTest) RegisterSvcEntry(entry *zeroconf.ServiceEntry, ifaces []net.Interface) (zeroconfServer, error) {
+	zcst := zeroconfServerTest{}
+	return zcst, nil
 }
